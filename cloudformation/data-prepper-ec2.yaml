@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Data Prepper Performance Test on EC2
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket where Gatling results and JAR file are stored.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnet Ids where instances should be deployed.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC to use
+
+  CidrBlock:
+    Type: String
+    Description: The CIDR block from the VPC. e.g. 172.31.0.0/16
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 Key Pair for SSH access.
+
+Resources:
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataPrepperPerformanceTestEc2
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DataPrepperPerformanceTest
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: DataPrepperPerformanceTestEc2
+      Roles:
+        - Ref: EC2InstanceRole
+
+  DataPrepperSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: data-prepper-performance-test-ec2
+      VpcId: !Ref VpcId
+      GroupDescription: Grants access to Data Prepper ports.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 4900
+          ToPort: 4900
+          CidrIp: !Ref CidrBlock
+        - IpProtocol: tcp
+          FromPort: 2021
+          ToPort: 2021
+          CidrIp: !Ref CidrBlock
+
+  SSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: data-prepper-performance-test-ec2-ssh
+      VpcId: !Ref VpcId
+      GroupDescription: Grants SSH access to Data Prepper instances.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+
+  # Launch Template for EC2 instances
+  DataPrepperLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: DataPrepperPerformanceTestEc2
+      LaunchTemplateData:
+        ImageId: ami-0b6d6dacf350ebc82 # This might only work in us-west-2
+        InstanceType: m5.large
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Name: !Ref EC2InstanceProfile
+        SecurityGroupIds:
+          - !Ref DataPrepperSecurityGroup
+          - !Ref SSHSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            
+            dnf update -y
+            dnf install -y java-21-amazon-corretto
+            
+            # Allow SSH connections
+            systemctl start sshd
+
+            # Install SSM agent
+            dnf install -y amazon-ssm-agent
+            systemctl enable amazon-ssm-agent
+            systemctl start amazon-ssm-agent
+
+            # Download and install Data Prepper
+            aws s3 cp s3://${S3BucketName}/opensearch-data-prepper-2.11.0-SNAPSHOT-linux-x64.tar.gz /home/ec2-user/opensearch-data-prepper-2.11.0-SNAPSHOT-linux-x64.tar.gz
+            mkdir /home/ec2-user/data-prepper
+            tar xf /home/ec2-user/opensearch-data-prepper-2.11.0-SNAPSHOT-linux-x64.tar.gz -C /home/ec2-user/data-prepper --strip-components=1
+            
+            aws s3 cp s3://${S3BucketName}/data-prepper-setup.tar.gz /home/ec2-user/data-prepper-setup.tar.gz
+            mkdir /home/ec2-user/data-prepper-setup
+            tar xf /home/ec2-user/data-prepper-setup.tar.gz -C /home/ec2-user/data-prepper-setup
+  
+            # Create a systemd service for Data Prepper
+            cat <<EOF | sudo tee /etc/systemd/system/data-prepper.service
+            [Unit]
+            Description=Data Prepper
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=ec2-user
+            WorkingDirectory=/home/ec2-user/data-prepper
+            ExecStart=/home/ec2-user/data-prepper/bin/data-prepper /home/ec2-user/data-prepper-setup/data-prepper/pipelines/simple-pipeline.yaml /home/ec2-user/data-prepper-setup/data-prepper/config/data-prepper-config.yaml
+            Restart=always
+            RestartSec=5
+      
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+      
+            # Reload systemd, enable, and start Data Prepper
+            systemctl daemon-reload
+            systemctl enable data-prepper
+            systemctl start data-prepper
+
+  DataPrepperAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: DataPrepperPerformanceTestEc2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref DataPrepperLaunchTemplate
+        Version: !GetAtt DataPrepperLaunchTemplate.LatestVersionNumber
+      MinSize: 0
+      MaxSize: 50
+      DesiredCapacity: 1
+      VPCZoneIdentifier: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: DataPrepperPerformanceTestEc2
+          PropagateAtLaunch: true
+
+Outputs:
+  AutoScalingGroupName:
+    Description: Name of the Auto Scaling Group which runs the Data Prepper instances.
+    Value: !Ref DataPrepperAutoScalingGroup
