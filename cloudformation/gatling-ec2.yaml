@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Data Prepper Gatling Performance Test on EC2
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket where Gatling results and JAR file are stored.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnet Ids where instances should be deployed.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC to use
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 Key Pair for SSH access.
+
+Resources:
+
+  # IAM Role for EC2 to allow access to S3 and SSM
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataPrepperGatlingEc2
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+                - "ssm.amazonaws.com"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: "DataPrepperGatlingTest"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  # IAM Instance Profile (Attaches IAM Role to EC2 Instances)
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: DataPrepperGatlingEc2
+      Roles:
+        - Ref: EC2InstanceRole
+
+  # Security Group allowing inbound SSH access
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: data-prepper-gatling
+      VpcId: !Ref VpcId
+      GroupDescription: "Allow SSH access to EC2 instances"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+
+  # Launch Template for EC2 instances
+  GatlingLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: DataPrepperGatlingTest
+      VersionDescription: "Initial version"
+      LaunchTemplateData:
+        ImageId: ami-0b6d6dacf350ebc82 # This might only work in us-west-2
+        InstanceType: m5.large
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Name: !Ref EC2InstanceProfile
+        SecurityGroupIds:
+          - !Ref EC2SecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            # Update and install Java
+            dnf update -y
+            dnf install -y java-21-amazon-corretto
+
+            # Allow SSH connections
+            systemctl start sshd
+
+            # Install SSM agent
+            dnf install -y amazon-ssm-agent
+            systemctl enable amazon-ssm-agent
+            systemctl start amazon-ssm-agent
+
+            # Download the Data Prepper Performance Test Gatling simulation
+            aws s3 cp s3://${S3BucketName}/opensearch-data-prepper-performance-test.jar /home/ec2-user/opensearch-data-prepper-performance-test.jar
+
+  # Auto Scaling Group for Gatling Test Instances
+  GatlingAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: DataPrepperGatlingTest
+      LaunchTemplate:
+        LaunchTemplateId: !Ref GatlingLaunchTemplate
+        Version: !GetAtt GatlingLaunchTemplate.LatestVersionNumber
+      MinSize: 0
+      MaxSize: 50
+      DesiredCapacity: 4
+      VPCZoneIdentifier: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: DataPrepperGatlingPerformanceTest
+          PropagateAtLaunch: true
+
+Outputs:
+  AutoScalingGroupName:
+    Description: "Name of the Auto Scaling Group configured for Gatling"
+    Value: !Ref GatlingAutoScalingGroup

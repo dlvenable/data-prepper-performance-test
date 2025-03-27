@@ -1,0 +1,5 @@
+cloudformation/*.params.json
+
+.idea
+*.iml
+
