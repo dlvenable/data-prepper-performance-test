@@ -10,6 +10,10 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: List of subnet Ids where instances should be deployed.
 
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Additional security group. For example, the default.
+
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: The VPC to use
@@ -45,6 +49,15 @@ Resources:
                   - "s3:PutObject"
                 Resource:
                   - !Sub "arn:aws:s3:::${S3BucketName}/*"
+        - PolicyName: "OpenSearchIngestion"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "osis:*"
+                Resource:
+                  - "*"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
@@ -83,6 +96,7 @@ Resources:
           Name: !Ref EC2InstanceProfile
         SecurityGroupIds:
           - !Ref EC2SecurityGroup
+          - !Ref SecurityGroupId
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash

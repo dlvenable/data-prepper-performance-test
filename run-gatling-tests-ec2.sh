@@ -31,6 +31,9 @@ if [[ -z "$RESULTS_BUCKET" ]]; then
   exit 1
 fi
 
+# Generate a test run Id that will be in the S3 key.
+test_run=`date +"%Y-%m-%dT%H:%M:%S"`
+
 # Get instance IDs from the Auto Scaling Group
 INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names DataPrepperGatlingTest \
@@ -42,16 +45,13 @@ if [[ -z "$INSTANCE_IDS" ]]; then
   exit 1
 fi
 
-# Generate a test run Id that will be in the S3 key.
-test_run=`date +"%Y-%m-%dT%H:%M:%S"`
-
 # Use SSM to run Gatling on all EC2 instances
 aws ssm send-command \
   --no-cli-pager \
   --document-name "AWS-RunShellScript" \
   --targets "Key=InstanceIds,Values=${INSTANCE_IDS}" \
   --parameters "commands=[
-    'java $GATLING_JAVA_ARGS -jar /home/ec2-user/opensearch-data-prepper-performance-test.jar -rf /home/ec2-user/results -s $SIMULATION_CLASS',
+    'java -Xms6g -Xmx6g $GATLING_JAVA_ARGS -jar /home/ec2-user/opensearch-data-prepper-performance-test.jar -rf /home/ec2-user/results -s $SIMULATION_CLASS',
     'aws s3 cp /home/ec2-user/results/ s3://$RESULTS_BUCKET/results/$test_run/ --recursive',
     'rm -rf /home/ec2-user/results/*'
   ]" \
