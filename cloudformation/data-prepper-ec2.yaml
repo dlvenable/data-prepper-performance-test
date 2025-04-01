@@ -44,6 +44,10 @@ Resources:
                   - "s3:GetObject"
                 Resource:
                   - !Sub "arn:aws:s3:::${S3BucketName}/*"
+              - Effect: Allow
+                Action:
+                  - "cloudwatch:PutMetricData"
+                Resource: "*"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
@@ -130,6 +134,7 @@ Resources:
             Type=simple
             User=ec2-user
             WorkingDirectory=/home/ec2-user/data-prepper
+            Environment=JAVA_OPTS="-Xms6g -Xmx6g"
             ExecStart=/home/ec2-user/data-prepper/bin/data-prepper /home/ec2-user/data-prepper-setup/data-prepper/pipelines/simple-pipeline.yaml /home/ec2-user/data-prepper-setup/data-prepper/config/data-prepper-config.yaml
             Restart=always
             RestartSec=5
