@@ -1,4 +1,5 @@
 cloudformation/*.params.json
+build
 
 .idea
 *.iml

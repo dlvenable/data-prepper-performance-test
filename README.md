@@ -34,3 +34,24 @@ For example, to run the `TargetRpsSimulation` simulation, use:
 ```shell
 AWS_PROFILE=<profile> AWS_REGION=us-west-2 GATLING_JAVA_ARGS='-Dhost=<ipaddress>' SIMULATION_CLASS=org.opensearch.dataprepper.test.performance.TargetRpsSimulation ./run-gatling-tests-ec2.sh
 ```
+
+## Update Data Prepper
+
+
+```
+./upload-configuration.sh path/to/directory
+```
+
+This directory should have the following structure:
+
+```
+path/to/directory/
+  data-prepper/
+    pipelines/
+      ...any pipelines you need...
+    config/
+      data-prepper-config.yaml
+```
+
+After updating, detach the instances from the auto-scaling group so that the ASG deploys new instances.
+
