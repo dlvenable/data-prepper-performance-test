@@ -55,3 +55,41 @@ path/to/directory/
 
 After updating, detach the instances from the auto-scaling group so that the ASG deploys new instances.
 
+# Getting results
+
+To download results, use:
+
+```shell
+./results/download-results.sh TEST_RUN_ID
+```
+
+For example:
+
+```shell
+./results/download-results.sh 2025-04-07T13:54:49
+```
+
+This will download them into the `build/results` directory. The `TEST_RUN_ID` is part of the path.
+
+After downloading them, you can aggregate the results:
+
+```shell
+./results/aggregate-results.sh TEST_RUN_ID
+```
+
+This will create a file: `build/results/$TEST_RUN_ID/aggregate-simulation.log`.
+
+### Analyze
+
+```shell
+./results/summarize-results.sh TEST_RUN_ID
+```
+
+
+```shell
+./results/summarize-results.sh 2025-04-07T13:54:49
+```
+```
+OK:   464764
+KO:   474426
+```
